@@ -1,0 +1,7 @@
+[mcp_servers.orchestrator-bob]
+command = "node"
+args = ["mcp/server.mjs"]
+
+[mcp_servers.orchestrator-bob.env]
+ORCHESTRATOR_REPO = "."
+ORCHESTRATOR_SECURITY = "restricted"

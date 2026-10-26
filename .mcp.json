@@ -1,0 +1,12 @@
+{
+  "mcpServers": {
+    "orchestrator-bob": {
+      "command": "node",
+      "args": ["mcp/server.mjs"],
+      "env": {
+        "ORCHESTRATOR_REPO": ".",
+        "ORCHESTRATOR_SECURITY": "restricted"
+      }
+    }
+  }
+}

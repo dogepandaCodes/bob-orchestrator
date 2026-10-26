@@ -1,0 +1,10 @@
+{
+  "description": "Create engaging product demos by customizing AI themes with real logos, tailored for businesses seeking to showcase their offerings effectively.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
