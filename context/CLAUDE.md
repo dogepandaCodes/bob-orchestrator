@@ -427,6 +427,7 @@ once rather than one user's.
 | `mcp/bob.mjs` | Bob Shell runs: flags, parallel queue, resume, shadowed-mode check |
 | `mcp/roles.mjs` + `mcp/roles/custom_modes.yaml` | The four roles, their install as a Bob plugin, report parsing and citation checks |
 | `mcp/changes.mjs` | The implementer's worktrees, and applying or discarding a change |
+| `mcp/workspace.mjs` | Which repo the server works in: switching, validation, recents, the native folder dialog |
 | `mcp/redact.mjs` | Outbound redaction and forbidden paths, per security level |
 | `mcp/settings.mjs` | The shared security level (`mcp/settings.local.json`) |
 | `.mcp.json` | Registers the server with Claude Code for this repo |
@@ -547,7 +548,13 @@ window focus — installing Bob or exporting a key happens in another window.
   (server up, Bob not ready — the endpoint tools still answer) / **Not
   connected** (bridge unreachable, e.g. a build without the dev server)
 - **Status rows** — orchestrator server version and tool count, Bob Shell
-  version and whether `BOB_API_KEY` is set, the repo Bob reads
+  version and whether `BOB_API_KEY` is set, the roles plugin, the repo Bob reads
+- **Repository picker** — **Choose folder…** (the OS's own dialog, opened by
+  the server), recent folders, or a pasted path; switches without a restart.
+  The chat composer shows the current repo and links here. Mechanics and the
+  refused folders are in `mcp/README.md`
+- **Changes** — the implementer's open changes for this repo, with Apply and
+  Discard
 - **Setup steps**, ticked as they complete: install Bob Shell; create an
   Inference key and export it in `~/.zshrc` (never pasted into the app);
   `bob chat` once for the license; then ask
@@ -895,6 +902,17 @@ checkout is never written by Bob. The model performs the fan-out (one owner of
 orchestration — Bob's own subagents stay disabled); applying a change is the
 user's decision alone, so it is not a tool.
 
+**Choosing a repo: the agent on that machine picks, never the browser or SSH
+(2026-10-27).** Bob needs a real path, which only a process on the machine
+holding the code can see — a browser folder picker yields a handle, not a path.
+So the folder dialog is the OS's own, opened by the local server; the page only
+asks. Generalised for launch: one agent per machine (laptop or VM), each
+serving only folders its own user added there; the app chooses among them,
+never adds one. A VM gets its own agent; the hosted app never SSHes anywhere
+(see Deployment). SSH is acceptable only from the user's machine with their own
+keys, to bootstrap that agent — the VS Code Remote-SSH pattern. One repo per
+conversation: facts carry the repo they came from and replay only there.
+
 **Token savings are cost-shifting, not efficiency.** Total tokens across all
 systems likely *increase* — Bob does more work, including summarizing on the
 orchestrator's behalf. What drops is spend on the metered frontier model,
@@ -941,8 +959,15 @@ completed task.
 - [x] **Bob roles** (2026-10-26) — explorer, verifier, implementer, reviewer as
       a Bob plugin; parallel `delegate`; implement → review → revise → apply,
       verified end to end with real Bob from the page
-- [ ] Point the dev server at a git repo to use the implementer — this one
-      isn't under git, so the change tools are hidden here
+- [x] **Repo picker** (2026-10-27) — native folder dialog, recents, pasted
+      path, runtime switch, per-repo fact replay; validation verified
+- [ ] The native dialog itself, clicked by a person (macOS `osascript`;
+      zenity and PowerShell paths untested)
+- [ ] For launch: an agent per machine (laptop or VM) serving only folders
+      added there; **Clone from URL** into the agent's workspace folder; the
+      Remote-SSH bootstrap of a VM agent from the user's machine
+- [ ] Threads bound to a repo once threads persist — today facts carry their
+      repo, but the thread itself doesn't
 - [ ] Server-run checks: the implementer can't run commands, so run a
       configured build/test command in the worktree after each round and hand
       the result to the reviewer

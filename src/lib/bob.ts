@@ -23,12 +23,24 @@ export interface BobChange {
   worktree: string;
 }
 
+/** A folder Bob can work in — mcp/workspace.mjs. */
+export interface BobRepo {
+  path: string;
+  /** The path with the home folder shown as ~. */
+  display: string;
+  name: string;
+  exists: boolean;
+  git: boolean;
+}
+
 /** The server's own report — `orchestrator/status` in mcp/server.mjs. */
 export interface BobStatus {
   server: { name: string; version: string };
   repo: string;
   /** Changes need git: the Implementer works in a worktree. */
   git: boolean;
+  /** The current repo and the recently used ones, newest first. */
+  repos: { current: BobRepo; recent: BobRepo[] };
   security: SecurityLevel;
   levels: SecurityLevel[];
   bob: { installed: boolean; version: string | null; keySet: boolean };
@@ -43,6 +55,8 @@ export interface BobStatus {
 /** `_meta["orchestrator/trace"]`: who answered, and what the filter did. */
 export interface BobTrace {
   source?: "bob" | "scanner";
+  /** The repo the call read — fixed when it started, whatever happened after. */
+  repo?: string;
   security?: SecurityLevel;
   blocked?: boolean;
   redactions?: number;
@@ -168,11 +182,14 @@ export async function runTool(call: ToolCall, signal?: AbortSignal): Promise<Too
  * tools are on offer, and every fact gathered so far — whether or not this
  * model can call tools itself, which is what lets a fact survive a switch.
  */
-export function groundingPrompt(facts: Fact[], repo?: string | null, instructions?: string): string | undefined {
+export function groundingPrompt(
+  facts: Fact[],
+  { repo, tools, instructions }: { repo?: string | null; tools: boolean; instructions?: string },
+): string | undefined {
   const parts: string[] = [];
-  if (repo) {
+  if (tools) {
     parts.push(
-      `The user's repository is ${repo}. When a question depends on that code, use the tools rather than guessing. ` +
+      `The user's repository is ${repo ?? "the open project"}. When a question depends on that code, use the tools rather than guessing. ` +
         "Results have already passed the user's security filter; text marked «redacted» was removed on purpose.",
     );
     // The server's playbook, so the chat leads the roles the way Claude Code does.
@@ -180,8 +197,14 @@ export function groundingPrompt(facts: Fact[], repo?: string | null, instruction
   }
 
   // The latest answer to the same question wins; older ones are just noise.
+  // A fact about another repo isn't a fact about this one — after a switch on
+  // the Bob page, only what was read here still applies.
   const latest = new Map<string, Fact>();
-  for (const f of facts) if (f.status === "done" && f.result) latest.set(`${f.tool} ${f.args}`, f);
+  for (const f of facts) {
+    if (f.status !== "done" || !f.result) continue;
+    if (repo && f.trace?.repo && f.trace.repo !== repo) continue;
+    latest.set(`${f.tool} ${f.args}`, f);
+  }
   if (latest.size) {
     parts.push(
       "Facts Bob returned earlier in this conversation, verbatim. They held when fetched; " +
@@ -247,5 +270,21 @@ export function useBob() {
     setStatus((s) => (s ? { ...s, changes } : s));
   }, []);
 
-  return { status, specs, error, checking, refresh, setSecurity, reloadChanges, decideChange };
+  /**
+   * Switches every tool to another folder. The tool list follows, since the
+   * change tools exist only where git does.
+   */
+  const selectRepo = useCallback(async (path: string) => {
+    setStatus(await post<BobStatus>("/repos/select", { path }));
+    setSpecs(await fetchTools());
+  }, []);
+
+  /** The OS's own folder dialog, opened by the server. Null when the user cancels. */
+  const chooseRepo = useCallback(async () => {
+    const { path } = await post<{ path: string | null }>("/repos/choose", {});
+    if (path) await selectRepo(path);
+    return path;
+  }, [selectRepo]);
+
+  return { status, specs, error, checking, refresh, setSecurity, reloadChanges, decideChange, selectRepo, chooseRepo };
 }

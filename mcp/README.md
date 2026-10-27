@@ -47,6 +47,8 @@ through ICA call these tools — see "Bob in the chat" in `context/CLAUDE.md`.
 | `GET /bob-api/changes` | `orchestrator/changes` — the implementer's changes for this repo |
 | `POST /bob-api/changes/apply` | `orchestrator/applyChange` with `{ id }` — the user's decision, from the app's buttons |
 | `POST /bob-api/changes/discard` | `orchestrator/discardChange` with `{ id }` |
+| `POST /bob-api/repos/choose` | `orchestrator/chooseFolder` — opens the OS's folder dialog; `{ path }`, or `null` if cancelled |
+| `POST /bob-api/repos/select` | `orchestrator/setRepo` with `{ path }` — switches every tool to that folder |
 
 Local only: the peer must be loopback, `Host` must be localhost, and any
 `Origin` must match `Host` — a page on another site, or a DNS-rebinding
@@ -85,10 +87,35 @@ role's own fields (`role`, `change_id`, `round`, `verdict`, `cited` and
 filter did (`security`, `blocked`, `redactions`).
 
 Non-standard methods beside the MCP ones, for the web app: `orchestrator/status`,
-`orchestrator/setSecurity`, `orchestrator/changes`, `orchestrator/applyChange`
-and `orchestrator/discardChange`. Applying is deliberately a method and not a
+`orchestrator/setSecurity`, `orchestrator/changes`, `orchestrator/applyChange`,
+`orchestrator/discardChange`, `orchestrator/chooseFolder` and
+`orchestrator/setRepo`. Applying is deliberately a method and not a
 tool, so no model can apply a change — only the app's buttons reach it.
 `notifications/cancelled` is honored — it kills the Bob run behind that request.
+
+## Choosing the repo
+
+Each copy of the server works in one folder at a time (`mcp/workspace.mjs`).
+
+- **Claude Code's copy** is pinned by `.mcp.json` (`ORCHESTRATOR_REPO=.`) to
+  the project Claude Code has open, and never switches.
+- **The web app's copy** switches at runtime from the Bob page: **Choose
+  folder…** opens the operating system's own dialog (`osascript` on macOS,
+  `zenity` on Linux, PowerShell on Windows), run by the server so it returns a
+  real path — a browser's folder picker hands the page a handle, never a path
+  a Bob process can work in. Recent folders and a pasted path work too.
+- At startup: `ORCHESTRATOR_REPO` > the last choice (`mcp/repos.local.json`,
+  gitignored) > cwd.
+- **Refused:** the filesystem root, the home folder itself, anything that is
+  not a folder, and anything inside `~/.ssh`, `~/.aws`, `~/.gnupg`, `~/.kube`,
+  `~/.docker`, `~/.config`, `~/.bob`, `~/.claude`, `~/.orchestrator`,
+  `~/Library` or the system folders. Bob reads a workspace as freely as
+  source, so these are never one.
+- A folder that isn't under git is allowed; the change tools are simply not
+  listed there.
+- Every trace records the `repo` the call read, fixed when it started. The chat
+  replays only facts from the current repo, so a switch doesn't carry another
+  project's findings into the next answer.
 
 ## Security levels
 

@@ -2,7 +2,7 @@ import { useState } from "react";
 import { CornerMark } from "../components/CornerMark";
 import { AddSkillModal } from "../components/AddSkillModal";
 import type { ProviderId } from "../lib/themes";
-import { bobReady, type BobChange, type BobStatus, type SecurityLevel } from "../lib/bob";
+import { bobReady, type BobChange, type BobRepo, type BobStatus, type SecurityLevel } from "../lib/bob";
 
 const SECURITY_LEVELS: {
   id: SecurityLevel;
@@ -247,6 +247,136 @@ function Step({ n, title, done, children }: { n: number; title: string; done?: b
   );
 }
 
+function RepoRow({
+  repo,
+  current = false,
+  busy = false,
+  disabled = false,
+  onUse,
+}: {
+  repo: BobRepo;
+  current?: boolean;
+  busy?: boolean;
+  disabled?: boolean;
+  onUse?: () => void;
+}) {
+  return (
+    <div className="flex items-center gap-3 py-1.5">
+      <span
+        className="w-2 h-2 rounded-full inline-block shrink-0"
+        style={{ background: current ? "var(--accent)" : "transparent", border: current ? "none" : "1px solid var(--border)" }}
+      />
+      <div className="flex-1 min-w-0">
+        <span className="text-[13px]" style={{ color: "var(--fg)" }}>{repo.name}</span>
+        <span className="mono text-[11.5px] ml-2 break-all" style={{ color: "var(--muted)" }}>{repo.display}</span>
+      </div>
+      <span className="text-[11px] shrink-0" style={{ color: repo.git ? "var(--muted)" : "#e2a336" }}>
+        {repo.git ? "git" : "no git · read-only"}
+      </span>
+      {current ? (
+        <span className="text-[11.5px] shrink-0 w-[52px] text-right" style={{ color: "var(--muted)" }}>current</span>
+      ) : (
+        <button
+          onClick={onUse}
+          disabled={disabled}
+          className="shrink-0 w-[52px] rounded-md px-2 py-0.5 text-[11.5px] disabled:opacity-60"
+          style={{ border: "0.5px solid var(--border)", color: "var(--fg)" }}
+        >
+          {busy ? "…" : "Use"}
+        </button>
+      )}
+    </div>
+  );
+}
+
+/**
+ * Which folder Bob works in. The dialog is the operating system's own, opened
+ * by the server — a browser's folder picker gives the page a handle, never the
+ * path a Bob process needs.
+ */
+function RepoPicker({
+  status,
+  onChoose,
+  onSelect,
+}: {
+  status: BobStatus;
+  onChoose: () => Promise<string | null>;
+  onSelect: (path: string) => Promise<void>;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [typed, setTyped] = useState("");
+  const { current, recent } = status.repos;
+
+  const run = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key);
+    setError(null);
+    try {
+      await fn();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    }
+    setBusy(null);
+  };
+
+  return (
+    <div className="ui rounded-xl px-4 py-3 mb-4" style={{ background: "var(--card)", border: "0.5px solid var(--border)" }}>
+      <div className="flex items-start gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="text-[13.5px] font-medium" style={{ color: "var(--fg)" }}>Repository</div>
+          <div className="text-[12px] mt-0.5 leading-relaxed" style={{ color: "var(--muted)" }}>
+            Bob works in one folder at a time. A switch applies from the next question, and what Bob found in the
+            previous folder stops being passed to the model.
+          </div>
+        </div>
+        <button
+          onClick={() => void run("choose", onChoose)}
+          disabled={busy !== null}
+          className="shrink-0 rounded-lg px-3 py-1.5 text-[12.5px] font-medium disabled:opacity-60"
+          style={{ background: "var(--accent)", color: "var(--accent-fg)" }}
+        >
+          {busy === "choose" ? "Waiting for the dialog…" : "Choose folder…"}
+        </button>
+      </div>
+      <div className="mt-2.5 flex flex-col">
+        <RepoRow repo={current} current />
+        {recent.map((r) => (
+          <RepoRow key={r.path} repo={r} busy={busy === r.path} disabled={busy !== null} onUse={() => void run(r.path, () => onSelect(r.path))} />
+        ))}
+      </div>
+      <form
+        className="mt-2 flex gap-2"
+        onSubmit={(e) => {
+          e.preventDefault();
+          const path = typed.trim();
+          if (path) void run("typed", async () => {
+            await onSelect(path);
+            setTyped("");
+          });
+        }}
+      >
+        <input
+          value={typed}
+          onChange={(e) => setTyped(e.target.value)}
+          placeholder="…or paste a path, like ~/code/my-site"
+          spellCheck={false}
+          className="mono flex-1 min-w-0 rounded-lg px-2.5 py-1.5 text-[12px] outline-none"
+          style={{ background: "var(--surface)", color: "var(--fg)", border: "0.5px solid var(--border)" }}
+        />
+        <button
+          type="submit"
+          disabled={busy !== null || !typed.trim()}
+          className="shrink-0 rounded-lg px-3 py-1.5 text-[12px] disabled:opacity-50"
+          style={{ border: "0.5px solid var(--border)", color: "var(--fg)" }}
+        >
+          {busy === "typed" ? "Switching…" : "Use path"}
+        </button>
+      </form>
+      {error && <p className="text-[12px] mt-2" style={{ color: "#e5484d" }}>{error}</p>}
+    </div>
+  );
+}
+
 const VERDICT: Record<string, { text: string; color: string }> = {
   approve: { text: "reviewer approved", color: "#3aa676" },
   changes_requested: { text: "reviewer requested changes", color: "#e2a336" },
@@ -326,6 +456,8 @@ export function Bob({
   onRefresh,
   onSecurity,
   onDecideChange,
+  onChooseRepo,
+  onSelectRepo,
 }: {
   active: ProviderId;
   dark: boolean;
@@ -336,6 +468,8 @@ export function Bob({
   onRefresh: () => void;
   onSecurity: (level: SecurityLevel) => Promise<void>;
   onDecideChange: (id: string, decision: "apply" | "discard") => Promise<void>;
+  onChooseRepo: () => Promise<string | null>;
+  onSelectRepo: (path: string) => Promise<void>;
 }) {
   const [pending, setPending] = useState<SecurityLevel | null>(null);
   const [securityError, setSecurityError] = useState<string | null>(null);
@@ -426,12 +560,13 @@ export function Bob({
           </div>
           <div style={{ borderTop: "0.5px solid var(--border)" }}>
             <StatusRow label="Repository" ok={status ? true : null}>
-              {status ? <span className="mono">{status.repo}</span> : "—"}
+              {status ? <span className="mono">{status.repos.current.display}</span> : "—"}
               {status && !status.git && " · not under git, so the implementer is off"}
-              {status && <span className="block text-[11.5px] mt-0.5">Set ORCHESTRATOR_REPO before starting the dev server to point Bob elsewhere.</span>}
             </StatusRow>
           </div>
         </div>
+
+        {status && <RepoPicker status={status} onChoose={onChooseRepo} onSelect={onSelectRepo} />}
 
         <div className="ui rounded-xl p-5" style={{ background: "var(--card)", border: "0.5px solid var(--border)" }}>
           <div className="flex flex-col gap-5">

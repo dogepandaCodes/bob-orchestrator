@@ -44,6 +44,7 @@ export default defineConfig(({ mode }) => {
           '**/.figma/**',
           // Runtime state the Bob page writes; watching it reloads the page mid-change.
           '**/mcp/settings.local.json*',
+          '**/mcp/repos.local.json*',
 ],
       },
     },
@@ -511,6 +512,8 @@ function icaGatewayProxy(): Plugin {
  *   GET  /bob-api/changes                         -> orchestrator/changes
  *   POST /bob-api/changes/apply    { id }         -> orchestrator/applyChange
  *   POST /bob-api/changes/discard  { id }         -> orchestrator/discardChange
+ *   POST /bob-api/repos/choose                    -> orchestrator/chooseFolder (native dialog)
+ *   POST /bob-api/repos/select     { path }       -> orchestrator/setRepo
  *
  * This reads the user's repository, so it answers this machine only: a
  * loopback peer, a localhost Host header (DNS rebinding), and no page from
@@ -568,7 +571,9 @@ function bobBridge(): Plugin {
       const open = (): Conn => {
         const proc = spawn(process.execPath, [script], {
           cwd: __dirname,
-          env: { ...process.env, ORCHESTRATOR_REPO: process.env.ORCHESTRATOR_REPO || __dirname },
+          // ORCHESTRATOR_REPO, if set, picks the repo at startup; otherwise the
+          // server resumes the Bob page's last choice (mcp/repos.local.json).
+          env: process.env,
           stdio: ['pipe', 'pipe', 'pipe'],
         })
         const c: Conn = { proc, pending: new Map(), ready: Promise.resolve() }
@@ -648,7 +653,7 @@ function bobBridge(): Plugin {
           if (req.method === 'GET' && route === '/changes') {
             return reply(200, await rpc('orchestrator/changes', undefined, ctl.signal))
           }
-          const POSTS = ['/call', '/security', '/changes/apply', '/changes/discard']
+          const POSTS = ['/call', '/security', '/changes/apply', '/changes/discard', '/repos/choose', '/repos/select']
           if (req.method !== 'POST' || !POSTS.includes(route)) {
             return reply(404, { error: `No such route: ${req.method} /bob-api${route}` })
           }
@@ -663,6 +668,13 @@ function bobBridge(): Plugin {
           // Applying writes to the user's checkout. It is reachable only from
           // this page's buttons — the bridge's local-only checks above — and
           // never as a tool, so no model can do it.
+          // The dialog waits for the user, so it gets minutes rather than seconds.
+          if (route === '/repos/choose') {
+            return reply(200, await rpc('orchestrator/chooseFolder', undefined, ctl.signal, 5 * 60_000))
+          }
+          if (route === '/repos/select') {
+            return reply(200, await rpc('orchestrator/setRepo', { path: String(body.path ?? '') }, ctl.signal))
+          }
           if (route === '/changes/apply' || route === '/changes/discard') {
             const method = route === '/changes/apply' ? 'orchestrator/applyChange' : 'orchestrator/discardChange'
             return reply(200, await rpc(method, { id: String(body.id ?? '') }, ctl.signal, 60_000))

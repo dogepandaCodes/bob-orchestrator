@@ -1,7 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useRef, useState } from "react";
 import { PROVIDERS, type ProviderId } from "../lib/themes";
 import type { Turn } from "../lib/useChat";
-import type { BobChange, Fact } from "../lib/bob";
+import type { BobChange, BobRepo, Fact } from "../lib/bob";
 import { EFFORT_LABEL, type Effort, type ModelOption } from "../lib/providers";
 import { ProviderBadge } from "../components/Logos";
 import { CornerMark } from "../components/CornerMark";
@@ -457,6 +457,8 @@ export function Home({
   changes = [],
   onReloadChanges,
   onDecideChange,
+  repo,
+  onOpenRepo,
 }: {
   /** Null until the user connects something — no provider is preselected. */
   active: ProviderId | null;
@@ -483,6 +485,9 @@ export function Home({
   changes?: BobChange[];
   onReloadChanges?: () => Promise<void>;
   onDecideChange?: (id: string, decision: "apply" | "discard") => Promise<void>;
+  /** The folder Bob works in; shown by the composer, chosen on the Bob page. */
+  repo?: BobRepo;
+  onOpenRepo?: () => void;
 }) {
   const [draft, setDraft] = useState("");
   const changesCtx = useMemo<Changes | null>(
@@ -600,7 +605,20 @@ export function Home({
               onSwitch={onSwitch}
               onAdd={onConnect}
             />
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 min-w-0">
+              {repo && (
+                <button
+                  onClick={onOpenRepo}
+                  title={`Bob works in ${repo.display}. Change it on the Bob page.`}
+                  className="ui min-w-0 inline-flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px]"
+                  style={{ color: "var(--muted)" }}
+                >
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="shrink-0">
+                    <path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />
+                  </svg>
+                  <span className="truncate max-w-[160px]">{repo.name}</span>
+                </button>
+              )}
               {efforts && effort && (
                 // Same picker as the model, fed the levels this model accepts.
                 <ModelSelector

@@ -1,9 +1,10 @@
 import { readFileSync, readdirSync, statSync } from "node:fs";
-import { join, relative, resolve, sep } from "node:path";
+import { join, relative, sep } from "node:path";
 import { isForbiddenPath } from "./redact.mjs";
 import { bobAvailable, runBob } from "./bob.mjs";
 import { ROLES, checkEvidence, installRoles, parseReport, renderReport } from "./roles.mjs";
 import { commitRound, createChange, diffChange, discardChange, openChange, repoTop, updateChange } from "./changes.mjs";
+import { repoRoot } from "./workspace.mjs";
 
 const SKIP_DIRS = new Set([
   "node_modules", ".git", "dist", "build", ".next", ".cache", ".vite", "coverage", ".figma",
@@ -12,11 +13,10 @@ const SOURCE_EXT = /\.(ts|tsx|js|jsx|mjs|cjs|py|rb|go|java|php|rs)$/i;
 const MAX_FILES = 4000;
 const MAX_BYTES = 400_000;
 
-export const REPO_ROOT = resolve(process.env.ORCHESTRATOR_REPO || process.cwd());
 
 /* ----------------------------------------------------------------- scanning */
 
-function* walk(dir, depth = 0) {
+function* walk(root, dir = root, depth = 0) {
   if (depth > 12) return;
   let entries;
   try {
@@ -28,10 +28,10 @@ function* walk(dir, depth = 0) {
     if (SKIP_DIRS.has(entry.name)) continue;
     if (entry.isDirectory() && entry.name.startsWith(".")) continue;
     const full = join(dir, entry.name);
-    const rel = relative(REPO_ROOT, full).split(sep).join("/");
+    const rel = relative(root, full).split(sep).join("/");
     if (isForbiddenPath(rel)) continue;
     if (entry.isDirectory()) {
-      yield* walk(full, depth + 1);
+      yield* walk(root, full, depth + 1);
     } else if (SOURCE_EXT.test(entry.name)) {
       yield { full, rel };
     }
@@ -40,7 +40,7 @@ function* walk(dir, depth = 0) {
 
 function sourceFiles() {
   const out = [];
-  for (const file of walk(REPO_ROOT)) {
+  for (const file of walk(repoRoot())) {
     out.push(file);
     if (out.length >= MAX_FILES) break;
   }
@@ -236,8 +236,8 @@ export const TOOLS = [
 const BOB_TOOLS = new Set(["delegate", "implement_change", "review_change"]);
 const CHANGE_TOOLS = new Set(["implement_change", "review_change"]);
 
-let isGit;
-const repoIsGit = () => (isGit ??= repoTop(REPO_ROOT) !== null);
+// Not cached: the repo can change at runtime, and so can whether it is under git.
+const repoIsGit = () => repoTop(repoRoot()) !== null;
 
 /** Bob's tools only where Bob can answer, and changes only where git can hold them. */
 export function listTools() {
@@ -294,8 +294,9 @@ async function delegate(args, signal) {
   const resume = args.follow_up ? String(args.follow_up) : undefined;
   if (resume && !TASK_ID.test(resume)) throw new Error("follow_up must be a task_id from an earlier delegate result");
 
-  const res = await runRole(role, { prompt: task, workspace: REPO_ROOT, resume, signal });
-  const evidence = checkEvidence(res.report.data, REPO_ROOT);
+  const workspace = repoRoot();
+  const res = await runRole(role, { prompt: task, workspace, resume, signal });
+  const evidence = checkEvidence(res.report.data, workspace);
   return {
     text: renderReport(role, res.report, { task_id: res.taskId }),
     meta: { ...res.meta, role, task_id: res.taskId, ...evidence },
@@ -306,7 +307,7 @@ async function implementChange(args, signal) {
   const task = String(args.task ?? "").trim();
   if (!task) throw new Error("task is required");
   const revising = Boolean(args.change_id);
-  let change = revising ? openChange(String(args.change_id)) : await createChange(REPO_ROOT, task);
+  let change = revising ? openChange(String(args.change_id)) : await createChange(repoRoot(), task);
   const round = change.rounds.length + 1;
 
   const prompt = revising
@@ -406,7 +407,7 @@ export async function runTool(name, args = {}, signal) {
       const entry = findRoute(index(), route);
       const facts = entry
         ? contractFacts(shape(entry))
-        : `The source scanner found no route matching "${route}" in ${REPO_ROOT}.`;
+        : `The source scanner found no route matching "${route}" in ${repoRoot()}.`;
       if (!bobAvailable()) {
         return {
           text: entry
@@ -466,7 +467,7 @@ function scan(name, args) {
       const routes = [...index().values()].map(shape).sort((a, b) => a.route.localeCompare(b.route));
       if (routes.length === 0) return "No HTTP routes found in this repo.";
       return [
-        `${routes.length} route(s) in ${REPO_ROOT}`,
+        `${routes.length} route(s) in ${repoRoot()}`,
         "",
         ...routes.map((r) => {
           const methods = r.methods.length ? r.methods.join("/") : "—";

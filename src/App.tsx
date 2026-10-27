@@ -250,6 +250,8 @@ export default function App() {
               changes={bob.status?.changes}
               onReloadChanges={bob.reloadChanges}
               onDecideChange={bob.decideChange}
+              repo={bob.status?.repos.current}
+              onOpenRepo={() => setPage("bob")}
             />
           )}
           {page === "context" && (
@@ -274,6 +276,8 @@ export default function App() {
               onRefresh={() => void bob.refresh()}
               onSecurity={bob.setSecurity}
               onDecideChange={bob.decideChange}
+              onChooseRepo={bob.chooseRepo}
+              onSelectRepo={bob.selectRepo}
             />
           )}
         </div>

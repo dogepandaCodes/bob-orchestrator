@@ -20,6 +20,7 @@ logs/
 /.plugins/
 /.opencode-skills/
 
-# Runtime state the Bob page writes (the shared security level), not source.
+# Runtime state the Bob page writes (security level, chosen repo), not source.
 mcp/settings.local.json*
+mcp/repos.local.json*
 .DS_Store

@@ -8,7 +8,8 @@
  * and the failure looks like a client bug.
  *
  * Run:  node mcp/server.mjs
- * Env:  ORCHESTRATOR_REPO=/path/to/repo   (default: cwd)
+ * Env:  ORCHESTRATOR_REPO=/path/to/repo   (at startup; default: the Bob page's last
+ *         choice, then cwd. The page switches it at runtime.)
  *       ORCHESTRATOR_SECURITY=none|restricted|private   (default: restricted;
  *         mcp/settings.local.json, written by the Bob page, overrides it)
  *       BOB_API_KEY=…                     (Bob Shell's own; an Inference key)
@@ -17,10 +18,11 @@
  *       ORCHESTRATOR_HOME=~/.orchestrator (where the implementer's changes live)
  */
 import { createInterface } from "node:readline";
-import { PLAYBOOK, REPO_ROOT, listTools, runTool } from "./repo.mjs";
+import { PLAYBOOK, listTools, runTool } from "./repo.mjs";
+import { chooseFolder, listRepos, repoRoot, selectRepo, warmFolderDialog } from "./workspace.mjs";
 import { bobAvailable, bobKeySet, bobVersion } from "./bob.mjs";
 import { installRoles, rolesStatus } from "./roles.mjs";
-import { applyChange, discardChange, listChanges, repoTop } from "./changes.mjs";
+import { applyChange, discardChange, listChanges } from "./changes.mjs";
 import { applySecurity } from "./redact.mjs";
 import { LEVELS, securityLevel, setSecurityLevel } from "./settings.mjs";
 
@@ -70,6 +72,8 @@ const countRedactions = (text) => (String(text).match(/«redacted/g) ?? []).leng
 async function callTool(params, signal) {
   const name = params?.name;
   const args = params?.arguments ?? {};
+  // Fixed now: a switch mid-run must not relabel what this call read.
+  const repo = repoRoot();
 
   let raw;
   try {
@@ -97,6 +101,7 @@ async function callTool(params, signal) {
     _meta: {
       "orchestrator/trace": {
         ...raw.meta,
+        repo,
         security: level,
         blocked,
         redactions: blocked ? 0 : countRedactions(text) - countRedactions(raw.text),
@@ -121,13 +126,18 @@ const changeSummary = (c) => ({
   worktree: c.worktree,
 });
 
-const changes = () => listChanges(REPO_ROOT).map(changeSummary);
+const changes = () => listChanges(repoRoot()).map(changeSummary);
 
 async function status() {
+  // Only the web app asks for status, so only its copy keeps a dialog warm —
+  // Claude Code's copy never starts one.
+  warmFolderDialog();
+  const repos = listRepos();
   return {
     server: SERVER_INFO,
-    repo: REPO_ROOT,
-    git: repoTop(REPO_ROOT) !== null,
+    repo: repos.current.path,
+    git: repos.current.git,
+    repos,
     security: securityLevel(),
     levels: LEVELS,
     bob: { installed: bobAvailable(), version: await bobVersion(), keySet: bobKeySet() },
@@ -188,6 +198,17 @@ async function handle(msg) {
       case "orchestrator/changes":
         return ok(id, { changes: changes() });
 
+      // Which repo every tool works in. The page's picker drives these; a
+      // client that never calls them keeps the repo it started with.
+      case "orchestrator/chooseFolder":
+        return ok(id, { path: await chooseFolder() });
+
+      case "orchestrator/setRepo": {
+        const repo = selectRepo(params?.path);
+        log(`repo set to ${repo.path}`);
+        return ok(id, await status());
+      }
+
       // Applying is the user's decision, so it is a method only the app's own
       // buttons reach — never a tool a model could call.
       case "orchestrator/applyChange": {
@@ -223,7 +244,7 @@ if (bobAvailable()) {
 }
 
 log(
-  `orchestrator-bob ready · repo=${REPO_ROOT} · security=${securityLevel()} · ` +
+  `orchestrator-bob ready · repo=${repoRoot()} · security=${securityLevel()} · ` +
     `bob=${bobAvailable() ? (bobKeySet() ? "present" : "present, BOB_API_KEY not set") : "absent (using source scanner)"}`,
 );
 

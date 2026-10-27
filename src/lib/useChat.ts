@@ -313,7 +313,7 @@ export function useChat(
           cred,
           model,
           messages: history,
-          system: groundingPrompt(known, useTools ? (bob?.repo ?? "the open project") : null, bob?.instructions),
+          system: groundingPrompt(known, { repo: bob?.repo, tools: useTools, instructions: bob?.instructions }),
           effort: applied,
           tools: useTools ? bob?.specs : undefined,
           rounds: useTools ? rounds : undefined,
