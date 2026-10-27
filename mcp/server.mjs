@@ -129,7 +129,7 @@ const changeSummary = (c) => ({
 const changes = () => listChanges(repoRoot()).map(changeSummary);
 
 async function status() {
-  // Only the web app asks for status, so only its copy keeps a dialog warm —
+  // Only the web app asks for status, so only its copy keeps a dialog ready —
   // Claude Code's copy never starts one.
   warmFolderDialog();
   const repos = listRepos();

@@ -961,8 +961,9 @@ completed task.
       verified end to end with real Bob from the page
 - [x] **Repo picker** (2026-10-27) — native folder dialog, recents, pasted
       path, runtime switch, per-repo fact replay; validation verified
-- [ ] The native dialog itself, clicked by a person (macOS `osascript`;
-      zenity and PowerShell paths untested)
+- [x] The native dialog, clicked by a person on macOS (2026-10-27): opens
+      near-instantly via the pre-started single-use helper; Cancel closes it
+- [ ] The zenity (Linux) and PowerShell (Windows) dialog paths are untested
 - [ ] For launch: an agent per machine (laptop or VM) serving only folders
       added there; **Clone from URL** into the agent's workspace folder; the
       Remote-SSH bootstrap of a VM agent from the user's machine

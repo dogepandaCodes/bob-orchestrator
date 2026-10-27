@@ -160,77 +160,99 @@ function dialogCommand(start) {
   }
 }
 
-/* macOS: a warm helper (folder-dialog.js). A cold osascript takes 2-3 s to
-   become a GUI app and load AppKit before its dialog shows; kept running, the
-   panel opens at once. Anything that goes wrong falls back to the cold path. */
+/* macOS: a single-use helper (folder-dialog.js), started before the click so
+   the panel opens without osascript's 2-3 s cold start. Each one shows one
+   panel and exits; the server makes sure of it, since a window cannot outlive
+   its process. A long-lived helper once left a cancelled panel frozen. */
 
 const HELPER = join(dirname(fileURLToPath(import.meta.url)), "folder-dialog.js");
-let helper = null;
+const GONE_WITHIN_MS = 1000; // after answering, the helper must have exited
+const OPEN_AT_MOST_MS = 5 * 60_000; // a panel nobody closes is closed for them
+const FALLBACK = Symbol("fallback");
+
+let spare = null; // warm and unused
+let showing = null; // the helper whose panel is on screen
 
 function startHelper() {
-  if (helper || platform() !== "darwin") return helper;
   const proc = spawn("osascript", ["-l", "JavaScript", HELPER], { stdio: ["pipe", "pipe", "ignore"] });
-  const h = { proc, waiting: null, ready: null };
-  let markReady;
-  let markFailed;
-  h.ready = new Promise((ok, no) => ((markReady = ok), (markFailed = no)));
-  h.ready.catch(() => {});
-
-  createInterface({ input: proc.stdout }).on("line", (line) => {
-    if (line === "ready") return markReady();
-    const waiting = h.waiting;
-    h.waiting = null;
-    try {
-      waiting?.done(JSON.parse(line).path ?? null);
-    } catch (e) {
-      waiting?.fail(e);
-    }
+  const h = { proc, exited: false, onAnswer: null, onExit: null };
+  h.ready = new Promise((ok, no) => {
+    createInterface({ input: proc.stdout }).on("line", (line) => {
+      if (line === "ready") return ok();
+      try {
+        h.onAnswer?.(JSON.parse(line).path ?? null);
+      } catch {
+        h.onAnswer?.(null);
+      }
+    });
+    const gone = () => {
+      h.exited = true;
+      if (spare === h) spare = null;
+      no(new Error("The folder dialog helper stopped before it was ready."));
+      h.onExit?.();
+    };
+    proc.on("exit", gone);
+    proc.on("error", gone);
   });
-  const gone = () => {
-    if (helper === h) helper = null;
-    markFailed(new Error("The folder dialog helper stopped."));
-    h.waiting?.fail(new Error("The folder dialog closed unexpectedly."));
-    h.waiting = null;
-  };
-  proc.on("exit", gone);
-  proc.on("error", gone);
+  h.ready.catch(() => {});
   proc.stdin.on("error", () => {});
-  helper = h;
   return h;
 }
 
-/** Starts the helper before the first click. Cheap to call again. */
+const kill = (h) => {
+  if (!h.exited) h.proc.kill("SIGKILL");
+};
+
+/** Has a helper ready before the next click. Cheap to call again. */
 export function warmFolderDialog() {
+  if (platform() !== "darwin" || spare || showing) return;
   try {
-    startHelper();
+    spare = startHelper();
   } catch {
-    // The cold path still works.
+    // The cold dialog still works.
   }
 }
 
 const within = (promise, ms) =>
   Promise.race([promise, new Promise((_, no) => setTimeout(() => no(new Error("timed out")), ms))]);
 
-async function chooseWarm(h) {
-  if (h.waiting) throw refuse("A folder dialog is already open.");
-  return new Promise((done, fail) => {
-    h.waiting = { done, fail };
-    h.proc.stdin.write(`${JSON.stringify({ prompt: PROMPT, start: dirname(current) })}\n`);
-  });
+async function chooseWarm() {
+  const h = spare ?? startHelper();
+  spare = null;
+  try {
+    await within(h.ready, 3000);
+  } catch {
+    kill(h);
+    return FALLBACK;
+  }
+  showing = h;
+  let timer;
+  try {
+    return await new Promise((done) => {
+      h.onAnswer = done;
+      h.onExit = () => done(null); // killed or crashed: there is no panel any more
+      timer = setTimeout(() => {
+        kill(h);
+        done(null);
+      }, OPEN_AT_MOST_MS);
+      h.proc.stdin.write(`${JSON.stringify({ prompt: PROMPT, start: dirname(current) })}\n`);
+    });
+  } finally {
+    clearTimeout(timer);
+    showing = null;
+    // It exits by itself once it has answered. If it hasn't, its panel may
+    // still be on screen — end it, which takes the window with it.
+    setTimeout(() => kill(h), GONE_WITHIN_MS).unref();
+    warmFolderDialog();
+  }
 }
 
 /** Opens the OS's folder dialog. Resolves the chosen path, or null if cancelled. */
 export async function chooseFolder() {
-  const h = startHelper();
-  if (h) {
-    let warm = true;
-    try {
-      await within(h.ready, 5000);
-    } catch {
-      warm = false;
-      h.proc.kill();
-    }
-    if (warm) return chooseWarm(h);
+  if (showing) throw refuse("A folder dialog is already open.");
+  if (platform() === "darwin") {
+    const path = await chooseWarm();
+    if (path !== FALLBACK) return path;
   }
   return chooseCold();
 }

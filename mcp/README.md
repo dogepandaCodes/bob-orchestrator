@@ -104,6 +104,13 @@ Each copy of the server works in one folder at a time (`mcp/workspace.mjs`).
   `zenity` on Linux, PowerShell on Windows), run by the server so it returns a
   real path — a browser's folder picker hands the page a handle, never a path
   a Bob process can work in. Recent folders and a pasted path work too.
+- **On macOS the dialog is pre-started** (`mcp/folder-dialog.js`, run by
+  `osascript -l JavaScript`): a cold `osascript` takes 2-3 s to become a GUI app
+  before the panel shows, so a helper does that ahead of the click, warmed by
+  the page's status check. Each helper shows **one** panel and exits, and the
+  server force-quits any still alive a second after answering — a long-lived
+  helper once left a cancelled panel frozen on screen, since a window cannot
+  outlive its process but can outlive the event loop that removes it.
 - At startup: `ORCHESTRATOR_REPO` > the last choice (`mcp/repos.local.json`,
   gitignored) > cwd.
 - **Refused:** the filesystem root, the home folder itself, anything that is
